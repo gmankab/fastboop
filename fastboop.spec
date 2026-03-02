@@ -58,7 +58,7 @@ fi
 %{cargo_license} > LICENSE.dependencies
 
 %install
-install -Dpm0755 target/rpm/fastboop-cli \
+install -Dpm0755 target/rpm/fastboop \
     %{buildroot}%{_bindir}/fastboop
 
 %if %{with check}

@@ -44,7 +44,7 @@ check() {
 package() {
 	local target_dir="$_cargo_target_dir/release"
 
-	install -Dm755 "$target_dir"/fastboop-cli "$pkgdir"/usr/bin/fastboop
+	install -Dm755 "$target_dir"/fastboop "$pkgdir"/usr/bin/fastboop
 }
 
 sha512sums=""
