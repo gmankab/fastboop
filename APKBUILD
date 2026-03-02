@@ -1,6 +1,6 @@
 # Maintainer: Sam Day <me@samcday.com>
 pkgname=fastboop
-pkgver=0.0.1_rc1_git
+pkgver=0.0.1_rc2_git
 pkgrel=0
 pkgdesc="Ephemeral Linux boot tool for USB-enabled pocket computers"
 url=https://github.com/samcday/fastboop
@@ -16,7 +16,7 @@ makedepends="
 
 _gitrev=main
 source="https://github.com/samcday/fastboop/archive/$_gitrev/fastboop-$_gitrev.tar.gz"
-builddir="$srcdir/fastboop-$_gitrev"
+builddir="$srcdir/fastboop-${_gitrev#v}"
 options="net"
 
 export RUSTFLAGS="$RUSTFLAGS --remap-path-prefix=$builddir=/build/"

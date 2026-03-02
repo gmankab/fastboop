@@ -65,7 +65,7 @@ jobs:
         if: inputs.release_mode == 'tag'
         run: |
           sed -i -e 's/^\(pkgver=.*\)_git$/\1/' APKBUILD
-          sed -i -e '/^_gitrev=/d' -e 's/_gitrev/pkgver/g' APKBUILD
+          sed -i -e "s/^_gitrev=.*/_gitrev=${{ github.ref_name }}/" APKBUILD
         shell: alpine.sh --root {0}
 
       - name: build package
