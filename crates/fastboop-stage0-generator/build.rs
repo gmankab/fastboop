@@ -28,13 +28,24 @@ fn main() {
         return;
     }
 
-    let workspace_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("workspace root")
-        .to_path_buf();
+    let (workspace_root, stage0_manifest) = resolve_nested_stage0_manifest(&manifest_dir)
+        .unwrap_or_else(|| {
+            let expected_manifest = manifest_dir
+                .parent()
+                .and_then(|p| p.parent())
+                .map(|root| root.join("stage0/Cargo.toml"))
+                .unwrap_or_else(|| manifest_dir.join("../../stage0/Cargo.toml"));
+            panic!(
+                "FASTBOOP_STAGE0_EMBED_PATH is required when source-repo nested stage0 build is unavailable (expected local manifest at {})",
+                expected_manifest.display()
+            )
+        });
 
-    let stage0_manifest = workspace_root.join("stage0/Cargo.toml");
+    println!(
+        "cargo:warning=fastboop-stage0 embed source: local nested build ({})",
+        stage0_manifest.display()
+    );
+
     let target_dir = out_dir.join("stage0-target");
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
@@ -144,6 +155,17 @@ fn resolve_prebuilt_embed_path(manifest_dir: &Path) -> Option<PathBuf> {
     }
 
     Some(resolved)
+}
+
+fn resolve_nested_stage0_manifest(manifest_dir: &Path) -> Option<(PathBuf, PathBuf)> {
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())?
+        .to_path_buf();
+    let stage0_manifest = workspace_root.join("stage0/Cargo.toml");
+    stage0_manifest
+        .is_file()
+        .then_some((workspace_root, stage0_manifest))
 }
 
 fn copy_embedded_stage0(source: &Path, out_dir: &Path) -> PathBuf {
