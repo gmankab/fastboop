@@ -21,7 +21,9 @@ Checksums are recorded in release `SHA256SUMS`.
 `crates/fastboop-stage0-generator/build.rs` supports two embed modes:
 
 1. `FASTBOOP_STAGE0_EMBED_PATH` set: copy the provided prebuilt stage0 binary and embed it.
-2. `FASTBOOP_STAGE0_EMBED_PATH` unset: run the local nested stage0 sub-build for contributor convenience.
+2. `FASTBOOP_STAGE0_EMBED_PATH` unset: run the local nested stage0 sub-build only when source-repo layout includes `stage0/Cargo.toml` (contributor convenience).
+
+If `FASTBOOP_STAGE0_EMBED_PATH` is unset and the local source tree does not expose `stage0/Cargo.toml` (for example crates.io/source package consumption), build.rs fails fast and requires an explicit prebuilt stage0 path.
 
 Optional knobs for nested sub-builds:
 
@@ -45,7 +47,7 @@ This preserves local `cargo build -p fastboop-cli` round-trips while allowing di
   - `--define 'fastboop_stage0_embed_path /path/to/fastboop-stage0-aarch64-unknown-linux-musl'` is passed, or
   - `%{_sourcedir}/fastboop-stage0-aarch64-unknown-linux-musl` exists.
 
-If no prebuilt stage0 path is provided, packaging falls back to the nested sub-build behavior.
+If no prebuilt stage0 path is provided, packaging falls back to nested sub-build behavior only when the local source repo includes the stage0 workspace sources.
 
 ## Armv7 Status
 
