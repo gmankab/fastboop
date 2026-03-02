@@ -16,7 +16,7 @@ makedepends="
 
 _gitrev=main
 source="https://github.com/samcday/fastboop/archive/$_gitrev/fastboop-$_gitrev.tar.gz"
-builddir="$srcdir/fastboop-$_gitrev"
+builddir="$srcdir/fastboop-${_gitrev#v}"
 options="net"
 
 export RUSTFLAGS="$RUSTFLAGS --remap-path-prefix=$builddir=/build/"
