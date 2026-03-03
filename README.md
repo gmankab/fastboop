@@ -1,37 +1,12 @@
 # fastboop
 
-fastboop boots Linux on supported phones/pocket devices over USB **without flashing**.
+fastboop makes it simple to live boot your favourite (supported) mainline Linux distro on your favourite (supported) pocket computer, **without modifying the device**.
 
-If your device supports non-mutating vendor boot (for now, fastboot RAM boot), fastboop builds an ephemeral boot payload and gets you into a live system.
+If you want to try fastboop, you can get started right now by visiting https://www.fastboop.win. There's also some [documentation available][user dox].
 
-## Core intent
+If you are interested in hacking on fastboop then check out the [dev dox][].
 
-- Keep boot flow non-mutating: no flash, no partition writes, no slot changes.
-- Reuse upstream artifacts instead of distro forks.
-- Be usable from CLI, desktop, and web frontends.
+🤖: read `AGENTS.md`
 
-## First steps
-
-1. Build the workspace:
-
-```sh
-cargo build --workspace --locked
-```
-
-2. Explore the CLI:
-
-```sh
-cargo run -p fastboop-cli -- --help
-cargo run -p fastboop-cli -- detect --help
-cargo run -p fastboop-cli -- stage0 --help
-cargo run -p fastboop-cli -- boot --help
-```
-
-3. Check available device profiles in `devprofiles.d/`.
-
-## Where to read next
-
-- Contributor and architecture notes: `HACKING.md`
-- Device profile model: `docs/dev/DEVICE_PROFILES.md`
-- Stage0 contract and behavior: `docs/dev/STAGE0.md`
-- UI stack notes: `docs/dev/attic/DIOXUS.md`
+[user dox]: http://docs.fastboop.win/user/
+[dev dox]: http://docs.fastboop.win/dev/

@@ -1,15 +1,33 @@
 # fastboop user docs
 
-fastboop boots supported phones and pocket computers into Linux over USB without flashing storage.
+fastboop makes it simple to live boot your favourite (supported) mainline Linux distro on your favourite (supported) pocket computer, **without modifying the device**.
 
-## What this gives you
+## Quickstart
 
-- Non-mutating boots from vendor USB boot mode.
-- Reuse of upstream distro/rootfs artifacts.
-- Ephemeral live sessions for trying a distro and validating hardware paths.
+fastboop is available as a web app, a desktop app, and a CLI tool.
+
+The quickest way to get started is to visit https://www.fastboop.win.
+
+### CLI
+
+fastboop is not yet widely packaged. You can install it from source if you have a recent Rust toolchain installed:
+
+```sh
+cargo install fastboop-cli@'>0.0.1-rc'
+```
+
+You can alternatively use [cargo-binstall][] to skip the build:
+
+```sh
+cargo binstall fastboop-cli@'>0.0.1-rc'
+```
+
+There's also [prebuilt binaries][latest-release] made available as part of each release.
 
 ## Next steps
 
-- Start with [Quick start](quick-start.md).
-- Read [Device permissions](device-permissions.md) before connecting hardware.
-- Check [FAQ](faq.md) for common gotchas.
+- Read about [Device permissions](device-permissions.md) if you encounter "access denied" problems.
+- Check the [FAQ](faq.md) for common gotchas.
+
+[cargo-binstall]: https://github.com/cargo-bins/cargo-binstall
+[latest-release]: https://github.com/samcday/fastboop/releases/latest
