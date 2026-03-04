@@ -13,16 +13,24 @@ use fastboop_stage0_generator::{build_stage0, Stage0Options, Stage0SwitchrootFs}
 use futures_util::StreamExt;
 #[cfg(target_arch = "wasm32")]
 use gibblox_android_sparse::AndroidSparseBlockReader;
-use gibblox_core::block_identity_string;
-use gibblox_core::BlockReader;
+use gibblox_core::{block_identity_string, BlockByteReader, BlockReader};
+#[cfg(target_arch = "wasm32")]
+use gibblox_core::AlignedByteReader;
 #[cfg(target_arch = "wasm32")]
 use gibblox_core::{GptBlockReader, GptPartitionSelector};
+#[cfg(target_arch = "wasm32")]
+use gibblox_pipeline::{
+    encode_pipeline, PipelineSource, PipelineSourceCasync, PipelineSourceCasyncSource,
+    PipelineSourceHttpSource,
+};
 #[cfg(not(target_arch = "wasm32"))]
-use gibblox_http::HttpBlockReader;
+use gibblox_http::HttpReader;
 #[cfg(target_arch = "wasm32")]
 use gibblox_mbr::{MbrBlockReader, MbrPartitionSelector};
 #[cfg(target_arch = "wasm32")]
-use gibblox_web_file::WebFileBlockReader;
+use gibblox_web_file::WebFileReader;
+#[cfg(target_arch = "wasm32")]
+use gibblox_web_worker::GibbloxWebWorker;
 #[cfg(target_arch = "wasm32")]
 use gibblox_xz::XzBlockReader;
 use gibblox_zip::ZipEntryBlockReader;
@@ -47,7 +55,6 @@ use ui::oneplus_fajita_dtbo_overlays;
 use ui::SmooStatsHandle;
 #[cfg(target_arch = "wasm32")]
 use ui::{apply_transport_counters, SmooTransportCounters};
-#[cfg(not(target_arch = "wasm32"))]
 use url::Url;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
@@ -261,8 +268,6 @@ pub async fn boot_selected_device(
         channel: runtime.channel,
         channel_offset_bytes: runtime.channel_offset_bytes,
         #[cfg(target_arch = "wasm32")]
-        gibblox_worker: runtime.gibblox_worker,
-        #[cfg(target_arch = "wasm32")]
         local_reader_bridge: runtime.local_reader_bridge,
         #[cfg(target_arch = "wasm32")]
         smoo_stats: runtime.smoo_stats,
@@ -298,7 +303,6 @@ async fn build_stage0_artifacts(
             let (
                 provider_reader,
                 size_bytes,
-                gibblox_worker,
                 local_reader_bridge,
                 channel_identity,
                 channel_offset_bytes,
@@ -316,7 +320,6 @@ async fn build_stage0_artifacts(
                         (
                             provider_reader,
                             size_bytes,
-                            None,
                             Some(local_reader_bridge),
                             channel_identity,
                             channel_offset_bytes,
@@ -324,23 +327,23 @@ async fn build_stage0_artifacts(
                         )
                     } else {
                         let channel_offset_bytes = channel_intake.consumed_bytes;
-                        let gibblox_worker =
-                            spawn_gibblox_worker(channel.clone(), channel_offset_bytes, None)
-                                .await
-                                .map_err(|err| {
-                                    anyhow::anyhow!("spawn gibblox worker failed: {err}")
-                                })?;
-                        let provider_reader = gibblox_worker.create_reader().await.map_err(|err| {
-                            anyhow::anyhow!("attach gibblox block reader for stage0: {err}")
-                        })?;
-                        let size_bytes = reader_size_bytes(&provider_reader).await?;
-                        let channel_identity = block_identity_string(&provider_reader);
-                        let provider_reader: Arc<dyn BlockReader> = Arc::new(provider_reader);
+                        let gibblox_worker = spawn_gibblox_worker(channel.clone(), 0, None)
+                            .await
+                            .map_err(|err| anyhow::anyhow!("spawn gibblox worker failed: {err}"))?;
+                        let provider_reader = open_channel_payload_reader_via_worker(
+                            &gibblox_worker,
+                            &channel,
+                            channel_offset_bytes,
+                            None,
+                        )
+                        .await?;
+                        let size_bytes = reader_size_bytes(provider_reader.as_ref()).await?;
+                        let channel_identity = block_identity_string(provider_reader.as_ref());
+                        let local_reader_bridge = LocalReaderBridge::new(provider_reader.clone());
                         (
                             provider_reader,
                             size_bytes,
-                            Some(gibblox_worker),
-                            None,
+                            Some(local_reader_bridge),
                             channel_identity,
                             channel_offset_bytes,
                             false,
@@ -359,7 +362,6 @@ async fn build_stage0_artifacts(
                     (
                         provider_reader,
                         size_bytes,
-                        None,
                         Some(local_reader_bridge),
                         channel_identity,
                         0,
@@ -371,12 +373,17 @@ async fn build_stage0_artifacts(
             let (provider, size_bytes, channel_identity, channel_offset_bytes) = {
                 let url = Url::parse(&channel)
                     .map_err(|err| anyhow::anyhow!("parse channel URL {channel}: {err}"))?;
-                let http_reader = HttpBlockReader::new(
+                let http_reader = HttpReader::new(
                     url.clone(),
                     gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE,
                 )
                 .await
                 .map_err(|err| anyhow::anyhow!("open HTTP reader {url}: {err}"))?;
+                let http_reader = BlockByteReader::new(
+                    http_reader,
+                    gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE,
+                )
+                .map_err(|err| anyhow::anyhow!("open HTTP block view {url}: {err}"))?;
                 let reader: Arc<dyn BlockReader> = Arc::new(http_reader);
                 let reader: Arc<dyn BlockReader> = match zip_entry_name_from_url(&url)? {
                     Some(entry_name) => {
@@ -468,8 +475,6 @@ async fn build_stage0_artifacts(
                     channel: channel.clone(),
                     channel_offset_bytes,
                     #[cfg(target_arch = "wasm32")]
-                    gibblox_worker,
-                    #[cfg(target_arch = "wasm32")]
                     local_reader_bridge,
                     #[cfg(target_arch = "wasm32")]
                     smoo_stats: SmooStatsHandle::new(),
@@ -482,6 +487,115 @@ async fn build_stage0_artifacts(
 
     rx.await
         .map_err(|_| anyhow::anyhow!("stage0 build task was cancelled"))?
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn open_channel_payload_reader_via_worker(
+    worker: &GibbloxWebWorker,
+    channel: &str,
+    channel_offset_bytes: u64,
+    channel_chunk_store_url: Option<&str>,
+) -> anyhow::Result<Arc<dyn BlockReader>> {
+    let channel = channel.trim();
+    if channel.is_empty() {
+        anyhow::bail!("channel URL is empty");
+    }
+
+    let url = Url::parse(channel).map_err(|err| anyhow::anyhow!("parse channel URL {channel}: {err}"))?;
+    if is_casync_archive_index_url(&url) {
+        anyhow::bail!(
+            "casync archive indexes (.caidx) are not supported for channel block reads; provide a casync blob index (.caibx)"
+        );
+    }
+
+    let chunk_store_url = parse_optional_chunk_store_url(channel_chunk_store_url)?;
+    if !is_casync_blob_index_url(&url) && chunk_store_url.is_some() {
+        anyhow::bail!(
+            "channel chunk store override is only supported with casync blob-index channels (.caibx)"
+        );
+    }
+
+    let pipeline_source = if is_casync_blob_index_url(&url) {
+        PipelineSource::Casync(PipelineSourceCasyncSource {
+            casync: PipelineSourceCasync {
+                index: url.to_string(),
+                chunk_store: Some(
+                    chunk_store_url
+                        .unwrap_or(derive_casync_chunk_store_url(&url)?)
+                        .to_string(),
+                ),
+            },
+        })
+    } else {
+        PipelineSource::Http(PipelineSourceHttpSource {
+            http: url.to_string(),
+        })
+    };
+
+    let pipeline_bytes = encode_pipeline(&pipeline_source)
+        .map_err(|err| anyhow::anyhow!("encode channel pipeline source: {err}"))?;
+    let opened = worker
+        .open_pipeline(&pipeline_bytes)
+        .await
+        .map_err(|err| anyhow::anyhow!("open gibblox worker pipeline: {err}"))?;
+
+    let reader: Arc<dyn BlockReader> = Arc::new(opened.reader);
+    let reader = crate::channel_source::maybe_offset_reader(reader, channel_offset_bytes).await?;
+    let reader: Arc<dyn BlockReader> = match zip_entry_name_from_url(&url)? {
+        Some(entry_name) => {
+            let zip_reader = ZipEntryBlockReader::new(&entry_name, reader)
+                .await
+                .map_err(|err| anyhow::anyhow!("open ZIP entry {entry_name}: {err}"))?;
+            Arc::new(zip_reader)
+        }
+        None => reader,
+    };
+    Ok(reader)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_optional_chunk_store_url(value: Option<&str>) -> anyhow::Result<Option<Url>> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let url = Url::parse(value)
+        .map_err(|err| anyhow::anyhow!("parse casync chunk_store URL {value}: {err}"))?;
+    Ok(Some(url))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_casync_blob_index_url(url: &Url) -> bool {
+    url.path().to_ascii_lowercase().ends_with(".caibx")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_casync_archive_index_url(url: &Url) -> bool {
+    url.path().to_ascii_lowercase().ends_with(".caidx")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn derive_casync_chunk_store_url(index_url: &Url) -> anyhow::Result<Url> {
+    if let Some(segments) = index_url.path_segments() {
+        let segments: Vec<&str> = segments.collect();
+        if let Some(index_pos) = segments.iter().rposition(|segment| *segment == "indexes") {
+            let mut base_segments = segments[..=index_pos].to_vec();
+            base_segments[index_pos] = "chunks";
+            let mut url = index_url.clone();
+            let mut path = String::from("/");
+            path.push_str(&base_segments.join("/"));
+            if !path.ends_with('/') {
+                path.push('/');
+            }
+            url.set_path(&path);
+            url.set_query(None);
+            url.set_fragment(None);
+            return Ok(url);
+        }
+    }
+
+    index_url
+        .join("./")
+        .map_err(|err| anyhow::anyhow!("derive casync chunk store URL from {index_url}: {err}"))
 }
 
 fn select_boot_profile_for_session(session: &DeviceSession) -> anyhow::Result<Option<BootProfile>> {
@@ -535,7 +649,7 @@ async fn open_web_file_channel_payload_reader(
         );
     }
 
-    let reader = WebFileBlockReader::new(web_file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+    let reader = WebFileReader::new(web_file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
         .map_err(|err| anyhow::anyhow!("open web file channel reader: {err}"))?;
     let reader: Arc<dyn BlockReader> = Arc::new(reader);
     let reader = crate::channel_source::maybe_offset_reader(reader, channel_offset_bytes).await?;
@@ -599,19 +713,21 @@ fn open_boot_profile_artifact_source<'a>(
                         path
                     );
                 };
-                let reader =
-                    WebFileBlockReader::new(web_file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
-                        .map_err(|err| {
-                            anyhow::anyhow!("open web file artifact source {path}: {err}")
-                        })?;
+                let reader = WebFileReader::new(web_file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+                    .map_err(|err| anyhow::anyhow!("open web file artifact source {path}: {err}"))?;
                 let reader: Arc<dyn BlockReader> = Arc::new(reader);
                 Ok(reader)
             }
             BootProfileArtifactSource::Xz(source) => {
                 let upstream = open_boot_profile_artifact_source(source.xz.as_ref()).await?;
-                let reader = XzBlockReader::new(upstream)
+                let upstream = AlignedByteReader::new(upstream)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("open aligned byte view for xz source: {err}"))?;
+                let reader = XzBlockReader::new_from_byte_reader(Arc::new(upstream))
                     .await
                     .map_err(|err| anyhow::anyhow!("open xz block reader: {err}"))?;
+                let reader = BlockByteReader::new(reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+                    .map_err(|err| anyhow::anyhow!("open xz block view: {err}"))?;
                 let reader: Arc<dyn BlockReader> = Arc::new(reader);
                 Ok(reader)
             }
@@ -717,7 +833,6 @@ async fn reader_size_bytes(reader: &dyn gibblox_core::BlockReader) -> anyhow::Re
         .ok_or_else(|| anyhow::anyhow!("channel size overflow"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn zip_entry_name_from_url(url: &Url) -> anyhow::Result<Option<String>> {
     let file_name = url
         .path_segments()
@@ -749,11 +864,7 @@ pub async fn run_web_host_daemon(
     mut sessions: SessionStore,
     session_id: String,
 ) -> anyhow::Result<()> {
-    let reader_client = if let Some(gibblox_worker) = runtime.gibblox_worker.clone() {
-        gibblox_worker.create_reader().await.map_err(|err| {
-            anyhow::anyhow!("attach gibblox block reader for smoo host worker: {err}")
-        })?
-    } else if let Some(local_reader_bridge) = runtime.local_reader_bridge.clone() {
+    let reader_client = if let Some(local_reader_bridge) = runtime.local_reader_bridge.clone() {
         local_reader_bridge
             .create_reader()
             .await

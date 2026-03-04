@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use fastboop_core::{read_channel_stream_head, CHANNEL_BOOT_PROFILE_STREAM_SCAN_MAX_BYTES};
-use gibblox_core::{BlockReader, ReadContext};
-use gibblox_http::HttpBlockReader;
+use gibblox_core::{BlockByteReader, BlockReader, ReadContext};
+use gibblox_http::HttpReader;
 #[cfg(target_arch = "wasm32")]
-use gibblox_web_file::WebFileBlockReader;
+use gibblox_web_file::WebFileReader;
 use js_sys::Reflect;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
@@ -115,7 +115,7 @@ pub(crate) async fn load_startup_channel_intake(
 ) -> Result<StartupChannelIntake, StartupChannelError> {
     #[cfg(target_arch = "wasm32")]
     if let Some(file) = resolve_web_file_channel(channel) {
-        let reader = WebFileBlockReader::new(file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+        let reader = WebFileReader::new(file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
             .map_err(|err| {
                 invalid_web_channel_error(channel, &format!("open web file reader: {err}"))
             })?;
@@ -126,13 +126,19 @@ pub(crate) async fn load_startup_channel_intake(
     let url =
         Url::parse(channel).map_err(|err| invalid_web_channel_error(channel, &err.to_string()))?;
 
-    let reader = HttpBlockReader::new(url.clone(), gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+    let reader = HttpReader::new(url.clone(), gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
         .await
         .map_err(|err| {
             invalid_web_channel_error(channel, &format!("open HTTP reader for {url}: {err}"))
         })?;
+    let exact_total_bytes = reader.size_bytes();
+    let reader = BlockByteReader::new(reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE).map_err(
+        |err| {
+            invalid_web_channel_error(channel, &format!("open HTTP block view for {url}: {err}"))
+        },
+    )?;
 
-    read_startup_channel_intake(channel, &reader, reader.size_bytes()).await
+    read_startup_channel_intake(channel, &reader, exact_total_bytes).await
 }
 
 async fn read_startup_channel_intake<R>(
