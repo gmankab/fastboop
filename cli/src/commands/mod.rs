@@ -757,7 +757,7 @@ async fn open_channel_source_reader(channel: &Path) -> Result<ChannelSourceReade
             return open_casync_reader(url, None, true).await;
         }
 
-        return open_cached_http_reader(url).await;
+        return open_uncached_http_reader(url).await;
     }
 
     let canonical =
@@ -1005,6 +1005,16 @@ async fn open_cached_http_reader(url: Url) -> Result<ChannelSourceReader> {
     Ok(ChannelSourceReader {
         reader: Arc::new(cached),
         exact_size_bytes,
+    })
+}
+
+async fn open_uncached_http_reader(url: Url) -> Result<ChannelSourceReader> {
+    let http_reader = HttpBlockReader::new(url.clone(), DEFAULT_IMAGE_BLOCK_SIZE)
+        .await
+        .map_err(|err| anyhow!("open HTTP reader {url}: {err}"))?;
+    Ok(ChannelSourceReader {
+        exact_size_bytes: http_reader.size_bytes(),
+        reader: Arc::new(http_reader),
     })
 }
 

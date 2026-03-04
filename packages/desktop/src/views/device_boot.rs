@@ -274,7 +274,7 @@ async fn build_stage0_artifacts(
                     {
                         let url = Url::parse(&channel)
                             .map_err(|err| anyhow!("parse channel URL {channel}: {err}"))?;
-                        let (reader, exact_size_bytes) = open_cached_http_reader(&url).await?;
+                        let (reader, exact_size_bytes) = open_uncached_http_reader(&url).await?;
 
                         if exact_size_bytes != channel_intake.exact_total_bytes {
                             warn!(
@@ -455,6 +455,14 @@ async fn open_cached_http_reader(url: &Url) -> Result<(Arc<dyn BlockReader>, u64
         .await
         .map_err(|err| anyhow!("initialize std cache for HTTP source: {err}"))?;
     Ok((Arc::new(cached), exact_size_bytes))
+}
+
+async fn open_uncached_http_reader(url: &Url) -> Result<(Arc<dyn BlockReader>, u64)> {
+    let http_reader = HttpBlockReader::new(url.clone(), gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+        .await
+        .map_err(|err| anyhow!("open HTTP reader {url}: {err}"))?;
+    let exact_size_bytes = http_reader.size_bytes();
+    Ok((Arc::new(http_reader), exact_size_bytes))
 }
 
 fn offset_tail_reader(

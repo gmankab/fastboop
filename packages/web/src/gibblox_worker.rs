@@ -30,7 +30,7 @@ mod wasm {
         let channel_chunk_store_url = worker_channel_chunk_store_url(&scope);
 
         spawn_local(async move {
-            match crate::channel_source::build_channel_reader_pipeline(
+            match crate::channel_source::build_channel_reader_pipeline_uncached_http(
                 &channel,
                 channel_offset_bytes,
                 channel_chunk_store_url.as_deref(),
