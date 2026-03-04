@@ -1,11 +1,7 @@
 # fastboop documentation
 
-Welcome to the fastboop docs.
+fastboop makes it simple to live boot your favourite (supported) mainline Linux distro on your favourite (supported) pocket computer, **without modifying the device**.
 
-fastboop is a non-mutating live-boot pipeline: it boots supported devices ephemerally without flashing or changing install state.
+If you want to use fastboop, [start here](user/index.md).
 
-Start here:
-
-- New users: [User docs overview](user/index.md)
-- First boot flow: [Quick start](user/quick-start.md)
-- Contributors: [Developer docs overview](dev/index.md)
+If you want to hack on fastboop, [start here](dev/index.md).

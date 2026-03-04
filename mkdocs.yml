@@ -22,8 +22,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - User docs:
-      - Overview: user/index.md
-      - Quick start: user/quick-start.md
+      - Quick start: user/index.md
       - Device permissions: user/device-permissions.md
       - FAQ: user/faq.md
   - Developer docs:
