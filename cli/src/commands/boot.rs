@@ -32,6 +32,7 @@ use super::{
 };
 
 const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const SMOO_MAX_IO_BYTES_KARG: &str = "smoo.max_io_bytes=1048576";
 
 struct DetectedFastbootDevice {
     fastboot: FastbootRusb,
@@ -414,6 +415,7 @@ async fn run_boot_inner(
         if let Some(system_time) = system_time_part.as_deref() {
             extra_parts.push(system_time.to_string());
         }
+        extra_parts.push(SMOO_MAX_IO_BYTES_KARG.to_string());
         let extra_cmdline = if extra_parts.is_empty() {
             None
         } else {

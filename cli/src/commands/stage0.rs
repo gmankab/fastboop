@@ -17,6 +17,8 @@ use super::{
     resolve_boot_profile_source_overrides, resolve_effective_ostree_arg,
 };
 
+const SMOO_MAX_IO_BYTES_KARG: &str = "smoo.max_io_bytes=1048576";
+
 #[derive(Args)]
 pub struct Stage0Args {
     /// Path or HTTP(S) URL to a channel artifact containing kernel/modules.
@@ -174,6 +176,7 @@ pub async fn run_stage0(args: Stage0Args) -> Result<()> {
         if let Some(cmdline) = merged_profile_cmdline.as_deref() {
             extra_parts.push(cmdline.to_string());
         }
+        extra_parts.push(SMOO_MAX_IO_BYTES_KARG.to_string());
         let extra_cmdline = if extra_parts.is_empty() {
             None
         } else {

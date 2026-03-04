@@ -69,6 +69,7 @@ const STATUS_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 const STATUS_RETRY_ATTEMPTS: usize = 5;
 #[cfg(target_arch = "wasm32")]
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+const SMOO_MAX_IO_BYTES_KARG: &str = "smoo.max_io_bytes=1048576";
 
 pub async fn boot_selected_device(
     sessions: &mut SessionStore,
@@ -281,7 +282,10 @@ async fn build_stage0_artifacts(
     if channel.is_empty() {
         return Err(anyhow::anyhow!("channel is empty"));
     }
-    let extra_kargs = boot_config.extra_kargs.trim().to_string();
+    let extra_kargs = join_cmdline(
+        nonempty(boot_config.extra_kargs.as_str()),
+        Some(SMOO_MAX_IO_BYTES_KARG),
+    );
 
     #[cfg(not(target_arch = "wasm32"))]
     let _ = (&channel_intake, &selected_boot_profile);
