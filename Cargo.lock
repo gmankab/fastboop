@@ -2847,6 +2847,7 @@ dependencies = [
  "gibblox-file",
  "gibblox-http",
  "gibblox-mbr",
+ "gibblox-pipeline",
  "gibblox-xz",
  "gibblox-zip",
  "gobblytes-core",
@@ -3700,12 +3701,16 @@ version = "0.0.1-rc.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c42c5df533d82af306051ffcb99709ca844596bbb72aaef49ba1002881e500"
 dependencies = [
+ "anyhow",
  "gibblox-android-sparse",
  "gibblox-cache",
  "gibblox-cache-store-opfs",
+ "gibblox-cache-store-std",
  "gibblox-casync",
+ "gibblox-casync-std",
  "gibblox-casync-web",
  "gibblox-core",
+ "gibblox-file",
  "gibblox-http",
  "gibblox-mbr",
  "gibblox-xz",
