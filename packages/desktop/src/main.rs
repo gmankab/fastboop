@@ -83,11 +83,13 @@ pub(crate) async fn load_startup_channel_intake(
             invalid_desktop_channel_error(channel, &format!("open HTTP reader for {url}: {err}"))
         })?;
     let exact_total_bytes = reader.size_bytes();
-    let reader = BlockByteReader::new(reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE).map_err(
-        |err| {
-            invalid_desktop_channel_error(channel, &format!("open HTTP block view for {url}: {err}"))
-        },
-    )?;
+    let reader =
+        BlockByteReader::new(reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE).map_err(|err| {
+            invalid_desktop_channel_error(
+                channel,
+                &format!("open HTTP block view for {url}: {err}"),
+            )
+        })?;
 
     read_startup_channel_intake(channel, &reader, exact_total_bytes).await
 }

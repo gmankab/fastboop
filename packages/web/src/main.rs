@@ -115,8 +115,8 @@ pub(crate) async fn load_startup_channel_intake(
 ) -> Result<StartupChannelIntake, StartupChannelError> {
     #[cfg(target_arch = "wasm32")]
     if let Some(file) = resolve_web_file_channel(channel) {
-        let reader = WebFileReader::new(file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
-            .map_err(|err| {
+        let reader =
+            WebFileReader::new(file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE).map_err(|err| {
                 invalid_web_channel_error(channel, &format!("open web file reader: {err}"))
             })?;
         let exact_total_bytes = reader.size_bytes();
@@ -132,11 +132,10 @@ pub(crate) async fn load_startup_channel_intake(
             invalid_web_channel_error(channel, &format!("open HTTP reader for {url}: {err}"))
         })?;
     let exact_total_bytes = reader.size_bytes();
-    let reader = BlockByteReader::new(reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE).map_err(
-        |err| {
+    let reader =
+        BlockByteReader::new(reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE).map_err(|err| {
             invalid_web_channel_error(channel, &format!("open HTTP block view for {url}: {err}"))
-        },
-    )?;
+        })?;
 
     read_startup_channel_intake(channel, &reader, exact_total_bytes).await
 }

@@ -88,7 +88,6 @@ mod wasm {
             .and_then(|s| s.as_string())
             .unwrap_or_else(|| format!("{value:?}"))
     }
-
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -13,20 +13,20 @@ use fastboop_stage0_generator::{build_stage0, Stage0Options, Stage0SwitchrootFs}
 use futures_util::StreamExt;
 #[cfg(target_arch = "wasm32")]
 use gibblox_android_sparse::AndroidSparseBlockReader;
-use gibblox_core::{block_identity_string, BlockByteReader, BlockReader};
 #[cfg(target_arch = "wasm32")]
 use gibblox_core::AlignedByteReader;
+use gibblox_core::{block_identity_string, BlockByteReader, BlockReader};
 #[cfg(target_arch = "wasm32")]
 use gibblox_core::{GptBlockReader, GptPartitionSelector};
+#[cfg(not(target_arch = "wasm32"))]
+use gibblox_http::HttpReader;
+#[cfg(target_arch = "wasm32")]
+use gibblox_mbr::{MbrBlockReader, MbrPartitionSelector};
 #[cfg(target_arch = "wasm32")]
 use gibblox_pipeline::{
     encode_pipeline, PipelineSource, PipelineSourceCasync, PipelineSourceCasyncSource,
     PipelineSourceHttpSource,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use gibblox_http::HttpReader;
-#[cfg(target_arch = "wasm32")]
-use gibblox_mbr::{MbrBlockReader, MbrPartitionSelector};
 #[cfg(target_arch = "wasm32")]
 use gibblox_web_file::WebFileReader;
 #[cfg(target_arch = "wasm32")]
@@ -501,7 +501,8 @@ async fn open_channel_payload_reader_via_worker(
         anyhow::bail!("channel URL is empty");
     }
 
-    let url = Url::parse(channel).map_err(|err| anyhow::anyhow!("parse channel URL {channel}: {err}"))?;
+    let url =
+        Url::parse(channel).map_err(|err| anyhow::anyhow!("parse channel URL {channel}: {err}"))?;
     if is_casync_archive_index_url(&url) {
         anyhow::bail!(
             "casync archive indexes (.caidx) are not supported for channel block reads; provide a casync blob index (.caibx)"
@@ -713,21 +714,25 @@ fn open_boot_profile_artifact_source<'a>(
                         path
                     );
                 };
-                let reader = WebFileReader::new(web_file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
-                    .map_err(|err| anyhow::anyhow!("open web file artifact source {path}: {err}"))?;
+                let reader =
+                    WebFileReader::new(web_file, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+                        .map_err(|err| {
+                            anyhow::anyhow!("open web file artifact source {path}: {err}")
+                        })?;
                 let reader: Arc<dyn BlockReader> = Arc::new(reader);
                 Ok(reader)
             }
             BootProfileArtifactSource::Xz(source) => {
                 let upstream = open_boot_profile_artifact_source(source.xz.as_ref()).await?;
-                let upstream = AlignedByteReader::new(upstream)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("open aligned byte view for xz source: {err}"))?;
+                let upstream = AlignedByteReader::new(upstream).await.map_err(|err| {
+                    anyhow::anyhow!("open aligned byte view for xz source: {err}")
+                })?;
                 let reader = XzBlockReader::new_from_byte_reader(Arc::new(upstream))
                     .await
                     .map_err(|err| anyhow::anyhow!("open xz block reader: {err}"))?;
-                let reader = BlockByteReader::new(reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
-                    .map_err(|err| anyhow::anyhow!("open xz block view: {err}"))?;
+                let reader =
+                    BlockByteReader::new(reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+                        .map_err(|err| anyhow::anyhow!("open xz block view: {err}"))?;
                 let reader: Arc<dyn BlockReader> = Arc::new(reader);
                 Ok(reader)
             }
