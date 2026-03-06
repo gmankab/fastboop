@@ -435,6 +435,11 @@ fn run_pid1(args: &Args, cleaned_args: &[OsString]) -> Result<()> {
         "final root path is missing or not a directory: {}",
         final_root.display()
     );
+    if stage0_yeet_fstab_enabled() {
+        remove_fstab_from_final_root(&final_root).context("remove /etc/fstab from final root")?;
+    } else {
+        info!("pid1: preserving /etc/fstab in final root (stage0.yeetfstab=0)");
+    }
     let final_root_str = path_to_string(&final_root)?;
 
     std::fs::create_dir_all(final_root.join("proc")).ok();
@@ -525,6 +530,9 @@ fn run_pid1(args: &Args, cleaned_args: &[OsString]) -> Result<()> {
         warn!("pid1: /run/systemd/system missing before exec");
     }
     ensure_serial_getty().ok();
+    if let Err(err) = stage_machine_id() {
+        warn!(error = ?err, "pid1: failed to stage ephemeral /etc/machine-id");
+    }
     stage_firstboot_credentials().context("stage firstboot credentials")?;
 
     let systemd_path = [
@@ -542,6 +550,25 @@ fn run_pid1(args: &Args, cleaned_args: &[OsString]) -> Result<()> {
     info!("pid1: exec {}", systemd_path);
     let err = std::process::Command::new(systemd_path).exec();
     Err(anyhow!("exec {systemd_path} failed: {err}"))
+}
+
+fn remove_fstab_from_final_root(final_root: &Path) -> Result<()> {
+    let fstab_path = final_root.join("etc/fstab");
+    match std::fs::remove_file(&fstab_path) {
+        Ok(()) => {
+            info!(
+                path = %fstab_path.display(),
+                "pid1: removed /etc/fstab from final root"
+            );
+            Ok(())
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("remove {}", fstab_path.display())),
+    }
+}
+
+fn stage0_yeet_fstab_enabled() -> bool {
+    cmdline_bool_with_default("stage0.yeetfstab", true)
 }
 
 fn cmdline_value(key: &str) -> Option<String> {
@@ -575,22 +602,29 @@ fn ensure_serial_getty() -> Result<()> {
     Ok(())
 }
 
-fn cmdline_flag(key: &str) -> bool {
-    stage0_config().contains_key(key)
+fn parse_bool_value(raw: &str) -> Option<bool> {
+    match raw {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 fn cmdline_bool(key: &str) -> bool {
+    cmdline_bool_with_default(key, false)
+}
+
+fn cmdline_bool_with_default(key: &str, default: bool) -> bool {
     if let Some(raw) = cmdline_value(key) {
-        return match raw.as_str() {
-            "1" | "true" | "yes" | "on" => true,
-            "0" | "false" | "no" | "off" => false,
-            _ => {
+        return match parse_bool_value(raw.as_str()) {
+            Some(value) => value,
+            None => {
                 warn!("pid1: invalid {key} value '{raw}'");
-                false
+                default
             }
         };
     }
-    cmdline_flag(key)
+    default
 }
 
 fn stage0_rootfs() -> Result<Stage0Rootfs> {
@@ -681,6 +715,46 @@ fn stage_firstboot_credentials() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn stage_machine_id() -> Result<()> {
+    std::fs::create_dir_all("/etc").context("create /etc")?;
+    let machine_id = generate_machine_id().context("generate machine-id")?;
+    let path = Path::new("/etc/machine-id");
+    if std::fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        std::fs::remove_file(path).context("remove /etc/machine-id symlink")?;
+    }
+
+    let mut contents = machine_id.into_bytes();
+    contents.push(b'\n');
+    std::fs::write(path, contents).context("write /etc/machine-id")?;
+    info!("pid1: staged ephemeral /etc/machine-id");
+    Ok(())
+}
+
+fn generate_machine_id() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    let mut urandom = File::open("/dev/urandom").context("open /dev/urandom")?;
+    urandom
+        .read_exact(&mut bytes)
+        .context("read /dev/urandom")?;
+    Ok(machine_id_from_bytes(bytes))
+}
+
+fn machine_id_from_bytes(mut bytes: [u8; 16]) -> String {
+    if bytes.iter().all(|byte| *byte == 0) {
+        bytes[0] = 1;
+    }
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut id = String::with_capacity(32);
+    for byte in bytes {
+        id.push(HEX[(byte >> 4) as usize] as char);
+        id.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    id
 }
 
 fn path_to_string(path: &Path) -> Result<String> {
@@ -1690,6 +1764,20 @@ fn parse_hex_u16(input: &str) -> Result<u16, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_root() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "fastboop-stage0-test-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create temp root");
+        root
+    }
 
     #[test]
     fn pid1_role_sanitizes_bootloader_tail_on_init() {
@@ -1745,5 +1833,61 @@ mod tests {
             Some(Stage0Rootfs::Ext4)
         );
         assert_eq!(Stage0Rootfs::from_stage0_value("xfs"), None);
+    }
+
+    #[test]
+    fn parse_bool_value_accepts_supported_literals() {
+        assert_eq!(parse_bool_value("1"), Some(true));
+        assert_eq!(parse_bool_value("true"), Some(true));
+        assert_eq!(parse_bool_value("yes"), Some(true));
+        assert_eq!(parse_bool_value("on"), Some(true));
+        assert_eq!(parse_bool_value("0"), Some(false));
+        assert_eq!(parse_bool_value("false"), Some(false));
+        assert_eq!(parse_bool_value("no"), Some(false));
+        assert_eq!(parse_bool_value("off"), Some(false));
+    }
+
+    #[test]
+    fn parse_bool_value_rejects_unknown_literals() {
+        assert_eq!(parse_bool_value("nah"), None);
+        assert_eq!(parse_bool_value("TRUE"), None);
+    }
+
+    #[test]
+    fn machine_id_from_bytes_is_lowercase_hex() {
+        let id = machine_id_from_bytes([
+            0x00, 0x01, 0x02, 0x03, 0xaa, 0xbb, 0xcc, 0xdd, 0x10, 0x20, 0x30, 0x40, 0xfe, 0xdc,
+            0xba, 0x98,
+        ]);
+        assert_eq!(id, "00010203aabbccdd10203040fedcba98");
+    }
+
+    #[test]
+    fn machine_id_from_bytes_rejects_all_zero_identity() {
+        let id = machine_id_from_bytes([0; 16]);
+        assert_eq!(id, "01000000000000000000000000000000");
+    }
+
+    #[test]
+    fn remove_fstab_removes_existing_file() {
+        let root = temp_root();
+        let etc = root.join("etc");
+        std::fs::create_dir_all(&etc).expect("create etc directory");
+        let fstab = etc.join("fstab");
+        std::fs::write(&fstab, b"tmpfs / tmpfs defaults 0 0\n").expect("write fstab file");
+
+        remove_fstab_from_final_root(&root).expect("remove fstab from final root");
+
+        assert!(!fstab.exists());
+        std::fs::remove_dir_all(&root).expect("remove temp root");
+    }
+
+    #[test]
+    fn remove_fstab_ignores_missing_file() {
+        let root = temp_root();
+
+        remove_fstab_from_final_root(&root).expect("ignore missing fstab");
+
+        std::fs::remove_dir_all(&root).expect("remove temp root");
     }
 }
