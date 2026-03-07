@@ -7,8 +7,8 @@ mod wasm {
     use gibblox_casync_web::{
         WebCasyncChunkStore, WebCasyncChunkStoreConfig, WebCasyncIndexSource,
     };
-    use gibblox_core::BlockReader;
-    use gibblox_http::HttpBlockReader;
+    use gibblox_core::{BlockByteReader, BlockReader};
+    use gibblox_http::HttpReader;
     use gibblox_zip::ZipEntryBlockReader;
     use std::sync::Arc;
     use tracing::info;
@@ -26,20 +26,6 @@ mod wasm {
             channel_offset_bytes,
             channel_chunk_store_url,
             true,
-        )
-        .await
-    }
-
-    pub async fn build_channel_reader_pipeline_uncached_http(
-        channel: &str,
-        channel_offset_bytes: u64,
-        channel_chunk_store_url: Option<&str>,
-    ) -> Result<Arc<dyn BlockReader>> {
-        build_channel_reader_pipeline_impl(
-            channel,
-            channel_offset_bytes,
-            channel_chunk_store_url,
-            false,
         )
         .await
     }
@@ -76,19 +62,21 @@ mod wasm {
             ));
         }
 
-        let http_reader = HttpBlockReader::new(url.clone(), DEFAULT_IMAGE_BLOCK_SIZE)
+        let http_reader = HttpReader::new(url.clone(), DEFAULT_IMAGE_BLOCK_SIZE)
             .await
             .map_err(|err| anyhow!("open HTTP reader {url}: {err}"))?;
+        let block_reader = BlockByteReader::new(http_reader, DEFAULT_IMAGE_BLOCK_SIZE)
+            .map_err(|err| anyhow!("open HTTP block view {url}: {err}"))?;
         let reader: Arc<dyn BlockReader> = if cache_http {
-            let cache = OpfsCacheOps::open_for_reader(&http_reader)
+            let cache = OpfsCacheOps::open_for_reader(&block_reader)
                 .await
                 .map_err(|err| anyhow!("open OPFS cache: {err}"))?;
-            let cached = CachedBlockReader::new(http_reader, cache)
+            let cached = CachedBlockReader::new(block_reader, cache)
                 .await
                 .map_err(|err| anyhow!("initialize OPFS cache: {err}"))?;
             Arc::new(cached)
         } else {
-            Arc::new(http_reader)
+            Arc::new(block_reader)
         };
         let reader = super::maybe_offset_reader(reader, channel_offset_bytes).await?;
         let reader: Arc<dyn BlockReader> = match zip_entry_name_from_url(&url)? {
@@ -129,6 +117,7 @@ mod wasm {
             CasyncReaderConfig {
                 block_size: DEFAULT_IMAGE_BLOCK_SIZE,
                 strict_verify: false,
+                identity: None,
             },
         )
         .await
@@ -201,7 +190,7 @@ mod wasm {
 }
 
 #[cfg(target_arch = "wasm32")]
-use gibblox_core::{ByteRangeReader, GibbloxError, GibbloxErrorKind, GibbloxResult, ReadContext};
+use gibblox_core::{AlignedByteReader, GibbloxError, GibbloxErrorKind, GibbloxResult, ReadContext};
 #[cfg(target_arch = "wasm32")]
 use std::sync::Arc;
 
@@ -233,7 +222,6 @@ struct OffsetChannelBlockReader {
     inner: Arc<dyn gibblox_core::BlockReader>,
     offset_bytes: u64,
     size_bytes: u64,
-    inner_size_bytes: u64,
     block_size: u32,
 }
 
@@ -262,7 +250,6 @@ impl OffsetChannelBlockReader {
             size_bytes: inner_size_bytes
                 .checked_sub(offset_bytes)
                 .ok_or_else(|| anyhow::anyhow!("channel stream offset underflow"))?,
-            inner_size_bytes,
             block_size,
         })
     }
@@ -319,11 +306,7 @@ impl gibblox_core::BlockReader for OffsetChannelBlockReader {
             GibbloxError::with_message(GibbloxErrorKind::OutOfRange, "channel read offset overflow")
         })?;
 
-        let byte_reader = ByteRangeReader::new(
-            self.inner.clone(),
-            self.block_size as usize,
-            self.inner_size_bytes,
-        );
+        let byte_reader = AlignedByteReader::new(self.inner.clone()).await?;
         byte_reader
             .read_exact_at(global_offset, &mut buf[..max_read], ctx)
             .await?;
@@ -337,16 +320,6 @@ pub use wasm::*;
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 pub fn build_channel_reader_pipeline(
-    _channel: &str,
-    _channel_offset_bytes: u64,
-    _channel_chunk_store_url: Option<&str>,
-) -> anyhow::Result<std::sync::Arc<dyn gibblox_core::BlockReader>> {
-    anyhow::bail!("channel reader pipeline is only available on wasm32 targets")
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
-pub fn build_channel_reader_pipeline_uncached_http(
     _channel: &str,
     _channel_offset_bytes: u64,
     _channel_chunk_store_url: Option<&str>,

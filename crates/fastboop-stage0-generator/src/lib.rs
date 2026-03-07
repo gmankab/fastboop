@@ -425,6 +425,7 @@ fn is_stage0_config_key(key: &str) -> bool {
         key,
         "ostree"
             | "stage0.fb"
+            | "stage0.yeetfstab"
             | "stage0.rootfs"
             | "smoo.acm"
             | "smoo.break"
@@ -448,7 +449,10 @@ fn is_stage0_config_key(key: &str) -> bool {
 }
 
 fn is_stage0_flag_key(key: &str) -> bool {
-    matches!(key, "stage0.fb" | "smoo.acm" | "smoo.mimic_fastboot")
+    matches!(
+        key,
+        "stage0.fb" | "stage0.yeetfstab" | "smoo.acm" | "smoo.mimic_fastboot"
+    )
 }
 
 fn is_firstboot_credential_key(key: &str) -> bool {
@@ -1266,11 +1270,15 @@ mod tests {
     #[test]
     fn split_extra_cmdline_extracts_stage0_tokens() {
         let (stage0_settings, passthrough) = split_extra_cmdline(
-            "quiet smoo.log=trace smoo.acm ostree=/ostree/boot.1/fedora/deadbeef/0",
+            "quiet smoo.log=trace smoo.acm stage0.yeetfstab=0 ostree=/ostree/boot.1/fedora/deadbeef/0",
         );
 
         assert_eq!(stage0_settings.get("smoo.log"), Some(&"trace".to_string()));
         assert_eq!(stage0_settings.get("smoo.acm"), Some(&"1".to_string()));
+        assert_eq!(
+            stage0_settings.get("stage0.yeetfstab"),
+            Some(&"0".to_string())
+        );
         assert_eq!(
             stage0_settings.get("ostree"),
             Some(&"/ostree/boot.1/fedora/deadbeef/0".to_string())

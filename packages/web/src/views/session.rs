@@ -15,8 +15,6 @@ use gibblox_blockreader_messageport::{MessagePortBlockReaderClient, MessagePortB
 #[cfg(target_arch = "wasm32")]
 use gibblox_core::BlockReader;
 #[cfg(target_arch = "wasm32")]
-use gibblox_web_worker::GibbloxWebWorker;
-#[cfg(target_arch = "wasm32")]
 use ui::SmooStatsHandle;
 #[cfg(target_arch = "wasm32")]
 use web_sys::MessageChannel;
@@ -113,8 +111,6 @@ pub struct BootRuntime {
     pub identity: String,
     pub channel: String,
     pub channel_offset_bytes: u64,
-    #[cfg(target_arch = "wasm32")]
-    pub gibblox_worker: Option<GibbloxWebWorker>,
     #[cfg(target_arch = "wasm32")]
     pub local_reader_bridge: Option<LocalReaderBridge>,
     #[cfg(target_arch = "wasm32")]

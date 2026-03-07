@@ -18,9 +18,10 @@ use fastboop_stage0_generator::{build_stage0, Stage0Options, Stage0SwitchrootFs}
 use gibblox_cache::CachedBlockReader;
 use gibblox_cache_store_std::StdCacheOps;
 use gibblox_core::{
-    block_identity_string, BlockReader, GibbloxError, GibbloxErrorKind, GibbloxResult, ReadContext,
+    block_identity_string, AlignedByteReader, BlockByteReader, BlockReader, GibbloxError,
+    GibbloxErrorKind, GibbloxResult, ReadContext,
 };
-use gibblox_http::HttpBlockReader;
+use gibblox_http::HttpReader;
 use gibblox_zip::ZipEntryBlockReader;
 use gobblytes_erofs::ErofsRootfs;
 use smoo_host_blocksource_gibblox::GibbloxBlockSource;
@@ -444,25 +445,29 @@ fn boot_profile_http_source_url(boot_profile: &BootProfile) -> Result<String> {
 }
 
 async fn open_cached_http_reader(url: &Url) -> Result<(Arc<dyn BlockReader>, u64)> {
-    let http_reader = HttpBlockReader::new(url.clone(), gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+    let http_reader = HttpReader::new(url.clone(), gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
         .await
         .map_err(|err| anyhow!("open HTTP reader {url}: {err}"))?;
     let exact_size_bytes = http_reader.size_bytes();
-    let cache = StdCacheOps::open_default_for_reader(&http_reader)
+    let block_reader = BlockByteReader::new(http_reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+        .map_err(|err| anyhow!("open HTTP block view {url}: {err}"))?;
+    let cache = StdCacheOps::open_default_for_reader(&block_reader)
         .await
         .map_err(|err| anyhow!("open std cache for HTTP source: {err}"))?;
-    let cached = CachedBlockReader::new(http_reader, cache)
+    let cached = CachedBlockReader::new(block_reader, cache)
         .await
         .map_err(|err| anyhow!("initialize std cache for HTTP source: {err}"))?;
     Ok((Arc::new(cached), exact_size_bytes))
 }
 
 async fn open_uncached_http_reader(url: &Url) -> Result<(Arc<dyn BlockReader>, u64)> {
-    let http_reader = HttpBlockReader::new(url.clone(), gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+    let http_reader = HttpReader::new(url.clone(), gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
         .await
         .map_err(|err| anyhow!("open HTTP reader {url}: {err}"))?;
     let exact_size_bytes = http_reader.size_bytes();
-    Ok((Arc::new(http_reader), exact_size_bytes))
+    let block_reader = BlockByteReader::new(http_reader, gobblytes_erofs::DEFAULT_IMAGE_BLOCK_SIZE)
+        .map_err(|err| anyhow!("open HTTP block view {url}: {err}"))?;
+    Ok((Arc::new(block_reader), exact_size_bytes))
 }
 
 fn offset_tail_reader(
@@ -497,7 +502,6 @@ struct OffsetChannelBlockReader {
     offset_bytes: u64,
     size_bytes: u64,
     block_size: u32,
-    inner_size_bytes: u64,
 }
 
 impl OffsetChannelBlockReader {
@@ -520,7 +524,6 @@ impl OffsetChannelBlockReader {
                 .checked_sub(offset_bytes)
                 .ok_or_else(|| anyhow!("channel consumed byte offset underflow"))?,
             block_size,
-            inner_size_bytes,
         })
     }
 }
@@ -573,15 +576,10 @@ impl gibblox_core::BlockReader for OffsetChannelBlockReader {
             GibbloxError::with_message(GibbloxErrorKind::OutOfRange, "global read offset overflow")
         })?;
 
-        let byte_reader = gibblox_core::ByteRangeReader::new(
-            self.inner.clone(),
-            self.block_size as usize,
-            self.inner_size_bytes,
-        );
+        let byte_reader = AlignedByteReader::new(self.inner.clone()).await?;
         byte_reader
             .read_exact_at(global_offset, &mut buf[..max_read], ctx)
-            .await
-            .map_err(|err| err)?;
+            .await?;
         Ok(max_read)
     }
 }
