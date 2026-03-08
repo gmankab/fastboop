@@ -22,3 +22,4 @@ jobs:
         with:
           bundle: fastboop-${{ matrix.arch }}.flatpak
           manifest-path: flatpak/win.fastboop.fastboop.yml
+          arch: ${{ matrix.arch }}
