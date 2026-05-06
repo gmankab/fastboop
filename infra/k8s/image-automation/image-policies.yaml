@@ -6,7 +6,7 @@ spec:
   imageRepositoryRef:
     name: frontdoor-edge
   filterTags:
-    pattern: '^(?P<ts>[0-9]+)$'
+    pattern: '^(?P<ts>[0-9]{10})$'
     extract: '$ts'
   policy:
     numerical:
